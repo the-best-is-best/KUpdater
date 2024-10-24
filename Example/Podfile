@@ -1,0 +1,13 @@
+use_frameworks!
+
+platform :ios, '10.0'
+
+target 'KUpdater_Example' do
+  pod 'KUpdater', :path => '../'
+
+  target 'KUpdater_Tests' do
+    inherit! :search_paths
+
+    
+  end
+end
