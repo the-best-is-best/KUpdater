@@ -34,7 +34,7 @@ struct AppInfo: Decodable {
     // MARK: - Singleton
 
     // MARK: - TestFlight variable
-    private var isTestFlight: Bool = false
+    @objc public var isTestFlight: Bool = false
 
     var appStoreId:String? = nil
     
@@ -44,7 +44,7 @@ struct AppInfo: Decodable {
 
     
     // MARK: - Show Update Function
-    @objc public func showUpdate(forceUpdate:Bool = false , isTestFlight: Bool = false) {
+    @objc public func showUpdate(forceUpdate:Bool = false) {
         self.isTestFlight = isTestFlight
         self.forceUpdate = forceUpdate
         DispatchQueue.global().async {
