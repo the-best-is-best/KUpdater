@@ -45,7 +45,6 @@ struct AppInfo: Decodable {
     
     // MARK: - Show Update Function
     @objc public func showUpdate(forceUpdate:Bool = false) {
-        self.isTestFlight = isTestFlight
         self.forceUpdate = forceUpdate
         DispatchQueue.global().async {
            self.checkVersion(force : self.forceUpdate)
