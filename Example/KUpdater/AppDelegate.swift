@@ -17,7 +17,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
         let kupdate = KUpdater.shared
-        kupdate.showUpdate(appStoreId: "6503191360", forceUpdate: false)
+        kupdate.showUpdate(forceUpdate: true)
         
         return true
     }

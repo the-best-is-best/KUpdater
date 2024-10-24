@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'KUpdater'
-  s.version          = '0.1.0'
+  s.version          = '0.1.1'
   s.summary          = 'This package is used in KMM to check for updates.'
 
 # This description is used to generate tags and improve search results.

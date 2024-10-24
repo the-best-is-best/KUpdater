@@ -34,26 +34,57 @@ struct AppInfo: Decodable {
     // MARK: - Singleton
 
     // MARK: - TestFlight variable
-    @objc public var isTestFlight: Bool = false
+    private var isTestFlight: Bool = false
 
-    @objc  public var appStoreId:String? = nil
+    var appStoreId:String? = nil
     
-    @objc public  var forceUpdate:Bool = false
+    var forceUpdate:Bool = false
     
     @objc public static let shared = KUpdater()
 
-
-
     
     // MARK: - Show Update Function
-    @objc public func showUpdate(isTestFlight: Bool = false, appStoreId:String, forceUpdate:Bool = false) {
+    @objc public func showUpdate(forceUpdate:Bool = false , isTestFlight: Bool = false) {
         self.isTestFlight = isTestFlight
-        self.appStoreId = appStoreId
         self.forceUpdate = forceUpdate
         DispatchQueue.global().async {
-                  self.checkVersion(force : forceUpdate)
-              }
+           self.checkVersion(force : self.forceUpdate)
+        }
     }
+    
+    private func fetchAppStoreId(completion: @escaping (String?, Error?) -> Void) {
+        guard let bundleIdentifier = self.getBundle(key: "CFBundleIdentifier"),
+              let url = URL(string: "http://itunes.apple.com/lookup?bundleId=\(bundleIdentifier)") else {
+            completion(nil, VersionError.invalidBundleInfo)
+            return
+        }
+
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            if let error = error {
+                completion(nil, error)
+                return
+            }
+            
+            guard let data = data else {
+                completion(nil, VersionError.invalidResponse)
+                return
+            }
+
+            do {
+                let result = try JSONDecoder().decode(LookupResult.self, from: data)
+                if let appInfo = result.results?.first, let appId = appInfo.trackViewUrl.components(separatedBy: "/id").last?.components(separatedBy: "?").first {
+                    completion(appId, nil)
+                } else {
+                    completion(nil, VersionError.dataError)
+                }
+            } catch {
+                completion(nil, error)
+            }
+        }
+
+        task.resume()
+    }
+
 
     // MARK: - Function to check version
     private  func checkVersion(force: Bool) {
@@ -198,7 +229,7 @@ extension UIViewController {
             }
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
             if(KUpdater.shared.forceUpdate){
-                KUpdater.shared.showUpdate(isTestFlight:KUpdater.shared.isTestFlight, appStoreId:KUpdater.shared.appStoreId!, forceUpdate: true )
+                KUpdater.shared.showUpdate()
             }
             
         }
