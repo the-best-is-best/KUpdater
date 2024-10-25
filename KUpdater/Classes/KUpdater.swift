@@ -38,16 +38,16 @@ struct AppInfo: Decodable {
 
     var appStoreId:String? = nil
     
-    var forceUpdate:Bool = false
+    static var forceUpdate:Bool = false
     
     @objc public static let shared = KUpdater()
 
     
     // MARK: - Show Update Function
     @objc public func showUpdate(forceUpdate:Bool = false) {
-        self.forceUpdate = forceUpdate
+        KUpdater.forceUpdate = forceUpdate
         DispatchQueue.global().async {
-           self.checkVersion(force : self.forceUpdate)
+            self.checkVersion(force : KUpdater.forceUpdate)
         }
     }
     
@@ -209,8 +209,8 @@ struct AppInfo: Decodable {
 
 // MARK: - Show Alert
 extension UIViewController {
-    @objc fileprivate func showAppUpdateAlert(version : String, force: Bool, appURL: String, isTestFlight: Bool) {
-        guard let appName = KUpdater.shared.getBundle(key: "CFBundleName") else { return } //Bundle.appName()
+    @objc fileprivate func showAppUpdateAlert(version: String, force: Bool, appURL: String, isTestFlight: Bool) {
+        guard let appName = KUpdater.shared.getBundle(key: "CFBundleName") else { return }
 
         let alertTitle = "New version"
         let alertMessage = "A new version of \(appName) is available on \(isTestFlight ? "TestFlight" : "AppStore"). Update now!"
@@ -222,18 +222,18 @@ extension UIViewController {
             alertController.addAction(notNowButton)
         }
 
-        let updateButton = UIAlertAction(title: "Update", style: .default) { (action:UIAlertAction) in
-            guard let url = URL(string: appURL) else {
-                return
-            }
+        let updateButton = UIAlertAction(title: "Update", style: .default) { _ in
+            guard let url = URL(string: appURL) else { return }
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
-            if(KUpdater.shared.forceUpdate){
-                KUpdater.shared.showUpdate()
-            }
             
+//            // Only call showUpdate again if forceUpdate is true
+            if KUpdater.forceUpdate {
+                KUpdater.shared.showUpdate(forceUpdate: true)
+            }
         }
 
         alertController.addAction(updateButton)
-        self.present(alertController, animated: true, completion: nil)
+            self.present(alertController, animated: true, completion: nil)
+
     }
 }
