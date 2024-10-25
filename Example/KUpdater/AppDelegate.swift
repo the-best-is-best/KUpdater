@@ -18,7 +18,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey: Any]?) -> Bool {
         let kupdate = KUpdater.shared
         kupdate.isTestFlight = false
-        kupdate.showUpdate(forceUpdate: true)
+        kupdate.showUpdate(forceUpdate: false , title: "Update", message: "New update available need update to see new features")
         
         return true
     }

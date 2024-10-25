@@ -44,10 +44,10 @@ struct AppInfo: Decodable {
 
     
     // MARK: - Show Update Function
-    @objc public func showUpdate(forceUpdate:Bool = false) {
+    @objc public func showUpdate(forceUpdate:Bool = false, title:String? = nil , message: String? = nil) {
         KUpdater.forceUpdate = forceUpdate
         DispatchQueue.global().async {
-            self.checkVersion(force : KUpdater.forceUpdate)
+            self.checkVersion(force : KUpdater.forceUpdate, title: title , message: message)
         }
     }
     
@@ -86,7 +86,7 @@ struct AppInfo: Decodable {
 
 
     // MARK: - Function to check version
-    private  func checkVersion(force: Bool) {
+    private  func checkVersion(force: Bool , title:String? = nil , message:String? = nil) {
         if let currentVersion = self.getBundle(key: "CFBundleShortVersionString") {
             _ = getAppInfo { (data, info, error) in
                 
@@ -104,7 +104,7 @@ struct AppInfo: Decodable {
                         print("Needs update: \(store) Version: \(appStoreAppVersion) > Current version: ", currentVersion)
                         DispatchQueue.main.async {
                             let topController: UIViewController = (UIApplication.shared.windows.first?.rootViewController)!
-                            topController.showAppUpdateAlert(version: appStoreAppVersion, force: force, appURL: (info?.trackViewUrl)!, isTestFlight: self.isTestFlight)
+                            topController.showAppUpdateAlert(version: appStoreAppVersion, force: force, appURL: (info?.trackViewUrl)!, isTestFlight: self.isTestFlight, title: title , message: message)
                         }
                     }
                 } else if let testFlightAppVersion = data?.attributes.version { // Check app on TestFlight
@@ -209,12 +209,25 @@ struct AppInfo: Decodable {
 
 // MARK: - Show Alert
 extension UIViewController {
-    @objc fileprivate func showAppUpdateAlert(version: String, force: Bool, appURL: String, isTestFlight: Bool) {
-        guard let appName = KUpdater.shared.getBundle(key: "CFBundleName") else { return }
+    @objc fileprivate func showAppUpdateAlert(version: String, force: Bool, appURL: String, isTestFlight: Bool , title:String? = nil , message:String?  = nil) {
+      //  guard let appName = KUpdater.shared.getBundle(key: "CFBundleName") else { return }
 
-        let alertTitle = "New version"
-        let alertMessage = "A new version of \(appName) is available on \(isTestFlight ? "TestFlight" : "AppStore"). Update now!"
-
+        let alertTitle:String
+        if(title != nil) {
+            alertTitle = title!
+        } else {
+            alertTitle = "Update Available"
+        }
+        let alertMessage: String
+        if(message == nil){
+            if KUpdater.forceUpdate {
+                alertMessage = "A new update is required to continue using this app."
+            } else {
+                alertMessage = "A new update is available. Would you like to update now?"
+            }
+        } else{
+            alertMessage = message!
+        }
         let alertController = UIAlertController(title: alertTitle, message: alertMessage, preferredStyle: .alert)
 
         if !force {
