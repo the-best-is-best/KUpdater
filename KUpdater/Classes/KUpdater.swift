@@ -31,7 +31,6 @@ struct AppInfo: Decodable {
 // MARK: - Check Update Class
 @objc public class KUpdater: NSObject {
 
-    // MARK: - Singleton
 
     // MARK: - TestFlight variable
     @objc public var isTestFlight: Bool = false
@@ -40,8 +39,35 @@ struct AppInfo: Decodable {
     
     static var forceUpdate:Bool = false
     
+    // MARK: - Singleton
     @objc public static let shared = KUpdater()
 
+    // MARK: - Check if Update is Available Function
+    @objc public func isUpdateAvailable(completion: @escaping (Bool, Error?) -> Void) {
+          if let currentVersion = self.getBundle(key: "CFBundleShortVersionString") {
+              _ = getAppInfo { (data, info, error) in
+                  if let error = error {
+                      completion(false, error)
+                      return
+                  }
+
+                  // Check App Store version if it's not in TestFlight
+                  if let appStoreAppVersion = info?.version, appStoreAppVersion > currentVersion {
+                      completion(true, nil)
+                  }
+                  // Check TestFlight version if in TestFlight
+                  else if let testFlightAppVersion = data?.attributes.version, testFlightAppVersion > currentVersion {
+                      completion(true, nil)
+                  }
+                  else {
+                      completion(false, nil)
+                  }
+              }
+          } else {
+              completion(false, VersionError.invalidBundleInfo)
+          }
+      }
+    
     
     // MARK: - Show Update Function
     @objc public func showUpdate(forceUpdate:Bool = false, title:String? = nil , message: String? = nil) {
