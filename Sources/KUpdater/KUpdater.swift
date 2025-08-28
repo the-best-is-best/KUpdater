@@ -1,10 +1,7 @@
-// The Swift Programming Language
-// https://docs.swift.org/swift-book
-
 import Foundation
 import UIKit
 
-// MARK: - Enum Errors
+// MARK: - Errors
 enum VersionError: Error {
     case invalidBundleInfo, invalidResponse, dataError
 }
@@ -30,253 +27,155 @@ struct AppInfo: Decodable {
     let trackViewUrl: String
 }
 
-
-// MARK: - Check Update Class
+// MARK: - KUpdater
+@MainActor
 @objc public class KUpdater: NSObject {
-
-
-    // MARK: - TestFlight variable
+    
     @objc public var isTestFlight: Bool = false
-    @objc public var authorizationTestFlight:String? = nil
-    @objc public var countryCode:String? = nil
-
-
-   @objc public var appStoreId:String? = nil
-
-    static var forceUpdate:Bool = false
-
-    // MARK: - Singleton
+    @objc public var authorizationTestFlight: String? = nil
+    @objc public var countryCode: String? = nil
+    @objc public var appStoreId: String? = nil
+    
     @objc public static let shared = KUpdater()
-
-    // MARK: - Check if Update is Available Function
-    @objc public func isUpdateAvailable(completion: @escaping (Bool, Error?) -> Void) {
-          if let currentVersion = self.getBundle(key: "CFBundleShortVersionString") {
-              _ = getAppInfo { (data, info, error) in
-                  if let error = error {
-                      completion(false, error)
-                      return
-                  }
-
-                  // Check App Store version if it's not in TestFlight
-                  if let appStoreAppVersion = info?.version, appStoreAppVersion > currentVersion {
-                      completion(true, nil)
-                  }
-                  // Check TestFlight version if in TestFlight
-                  else if let testFlightAppVersion = data?.attributes.version, testFlightAppVersion > currentVersion {
-                      completion(true, nil)
-                  }
-                  else {
-                      completion(false, nil)
-                  }
-              }
-          } else {
-              completion(false, VersionError.invalidBundleInfo)
-          }
-      }
-
-
-    // MARK: - Show Update Function
-    @objc public func showUpdate(forceUpdate:Bool = false, title:String? = nil , message: String? = nil) {
-        KUpdater.forceUpdate = forceUpdate
-        DispatchQueue.global().async {
-            self.checkVersion(force : KUpdater.forceUpdate, title: title , message: message)
-        }
+    
+    // MARK: - Show update
+    // The forceUpdate flag is now passed directly as a parameter.
+    @objc public func showUpdate(forceUpdate: Bool = false, title: String? = nil, message: String? = nil) {
+        // The checkVersion method is already on the MainActor, so we can call it directly.
+        checkVersion(force: forceUpdate, title: title, message: message)
     }
-
-    private func fetchAppStoreId(completion: @escaping (String?, Error?) -> Void) {
-        guard let bundleIdentifier = self.getBundle(key: "CFBundleIdentifier"),
-              let url = URL(string: "http://itunes.apple.com/lookup?bundleId=\(bundleIdentifier)") else {
-            completion(nil, VersionError.invalidBundleInfo)
+    
+    // MARK: - Check version
+    private func checkVersion(force: Bool, title: String? = nil, message: String? = nil) {
+        guard let currentVersion = getBundle(key: "CFBundleShortVersionString") else {
+            print("Error decoding current version")
             return
         }
-
-        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+        
+        // Capture the value of isTestFlight before the Sendable closure.
+        let isTestFlight = self.isTestFlight
+        
+        // Pass the force flag to the closure to be used later
+        _ = getAppInfo { [weak self] testFlightInfo, appStoreInfo, error in
+            guard let self = self else { return }
+            
+            // Use the local isTestFlight variable instead of self.isTestFlight
+            let store = isTestFlight ? "TestFlight" : "AppStore"
+            
             if let error = error {
-                completion(nil, error)
+                print("Error getting app \(store) version:", error)
                 return
             }
-
-            guard let data = data else {
-                completion(nil, VersionError.invalidResponse)
-                return
-            }
-
-            do {
-                let result = try JSONDecoder().decode(LookupResult.self, from: data)
-                if let appInfo = result.results?.first, let appId = appInfo.trackViewUrl.components(separatedBy: "/id").last?.components(separatedBy: "?").first {
-                    completion(appId, nil)
+            
+            // The calls to handleVersionCheck must be on the MainActor.
+            Task { @MainActor in
+                if let appStoreVersion = appStoreInfo?.version, !isTestFlight {
+                    self.handleVersionCheck(storeVersion: appStoreVersion, currentVersion: currentVersion, force: force, url: appStoreInfo?.trackViewUrl, title: title, message: message)
+                } else if let testFlightVersion = testFlightInfo?.attributes.version, isTestFlight {
+                    self.handleVersionCheck(storeVersion: testFlightVersion, currentVersion: currentVersion, force: force, url: appStoreInfo?.trackViewUrl, title: title, message: message)
                 } else {
-                    completion(nil, VersionError.dataError)
-                }
-            } catch {
-                completion(nil, error)
-            }
-        }
-
-        task.resume()
-    }
-
-
-    // MARK: - Function to check version
-    private  func checkVersion(force: Bool , title:String? = nil , message:String? = nil) {
-        if let currentVersion = self.getBundle(key: "CFBundleShortVersionString") {
-            _ = getAppInfo { (data, info, error) in
-
-                let store = self .isTestFlight ? "TestFlight" : "AppStore"
-
-                if let error = error {
-                    print("error getting app \(store) version: ", error)
-                }
-
-                if let appStoreAppVersion = info?.version { // Check app on AppStore
-                    // Check if the installed app is the same that is on AppStore, if it is, print on console, but if it isn't it shows an alert.
-                    if appStoreAppVersion <= currentVersion {
-                        print("Already on the last app version: ", currentVersion)
-                    } else {
-                        print("Needs update: \(store) Version: \(appStoreAppVersion) > Current version: ", currentVersion)
-                        DispatchQueue.main.async {
-                            let topController: UIViewController = (UIApplication.shared.windows.first?.rootViewController)!
-                            topController.showAppUpdateAlert(version: appStoreAppVersion, force: force, appURL: (info?.trackViewUrl)!, isTestFlight: self.isTestFlight, title: title , message: message)
-                        }
-                    }
-                } else if let testFlightAppVersion = data?.attributes.version { // Check app on TestFlight
-                // Check if the installed app is the same that is on TestFlight, if it is, print on console, but if it isn't it shows an alert.
-                    if testFlightAppVersion <= currentVersion {
-                        print("Already on the last app version: ",currentVersion)
-                    } else {
-                        print("Needs update: \(store) Version: \(testFlightAppVersion) > Current version: ", currentVersion)
-                        DispatchQueue.main.async {
-                            let topController: UIViewController = (UIApplication.shared.windows.first?.rootViewController)!
-                            topController.showAppUpdateAlert(version: testFlightAppVersion, force: force, appURL: (info?.trackViewUrl)!, isTestFlight: self.isTestFlight)
-                        }
-                    }
-                }  else { // App doesn't exist on store
                     print("App does not exist on \(store)")
                 }
             }
-        } else {
-            print("Erro to decode app current version")
         }
     }
-
-    private func getUrl(from identifier: String) -> String {
-        let region = countryCode ?? Locale.current.regionCode ?? "us" // إذا لم يتم توفير رمز البلد، استخدم البلد الافتراضي
-        let testflightURL = "https://api.appstoreconnect.apple.com/v1/apps/\(String(describing: KUpdater.shared.appStoreId))/builds"
-    let appStoreURL = "http://itunes.apple.com/\(region)/lookup?bundleId=\(identifier)"
-
+    
+    // This method is now also on the MainActor.
+    private func handleVersionCheck(storeVersion: String, currentVersion: String, force: Bool, url: String?, title: String?, message: String?) {
+        if storeVersion <= currentVersion {
+            print("Already on the last version:", currentVersion)
+        } else {
+            print("Needs update: Version \(storeVersion) > Current version \(currentVersion)")
+            // No need for DispatchQueue.main.async here as the class is on the MainActor.
+            guard let topVC = UIApplication.shared.windows.first?.rootViewController else { return }
+            topVC.showAppUpdateAlert(version: storeVersion, force: force, appURL: url ?? "", isTestFlight: self.isTestFlight, title: title, message: message)
+        }
+    }
+    
+    // MARK: - Helper
+    func getBundle(key: String) -> String? {
+        // This is safe to keep as a synchronous function.
+        guard let filePath = Bundle.main.path(forResource: "Info", ofType: "plist"),
+              let plist = NSDictionary(contentsOfFile: filePath),
+              let value = plist.object(forKey: key) as? String else {
+            return nil
+        }
+        return value
+    }
+    
+    @MainActor private func getUrl(from identifier: String) -> String {
+        let region = countryCode ?? Locale.current.regionCode ?? "us"
+        let testflightURL = "https://api.appstoreconnect.apple.com/v1/apps/\(appStoreId ?? "")/builds"
+        let appStoreURL = "http://itunes.apple.com/\(region)/lookup?bundleId=\(identifier)"
         return isTestFlight ? testflightURL : appStoreURL
     }
-
-    private func getAppInfo(completion: @escaping (TestFlightInfo?, AppInfo?, Error?) -> Void) -> URLSessionDataTask? {
-
+    
+    
+    @MainActor
+    private func getAppInfo(completion: @escaping @Sendable (TestFlightInfo?, AppInfo?, (any Error)?) -> Void) -> URLSessionDataTask? {
+        
         guard let identifier = self.getBundle(key: "CFBundleIdentifier"),
               let url = URL(string: getUrl(from: identifier)) else {
-                DispatchQueue.main.async {
-                    completion(nil, nil, VersionError.invalidBundleInfo)
-                }
-                return nil
+            // Correctly using Task to ensure the completion is called on the MainActor.
+            Task {
+                completion(nil, nil, VersionError.invalidBundleInfo)
+            }
+            return nil
         }
-
-        // You need to generate an authorizationTestFlight token to access the TestFlight versions and then you replace the ```***``` with the JWT token.
-        // Você precisa gerar um token de autorização para acessar as versões de TestFlight e depois você substitui o ```***``` com o token JWT gerado.
-        // https://developer.apple.com/documentation/appstoreconnectapi/generating_tokens_for_api_requests
-
-
+        
         var request = URLRequest(url: url)
-
-        // You just need to add an authorization header if you are checking TestFlight version
-        // Você só precisa adicionar uma autorização no header se você está checando a versão de testflight
         if self.isTestFlight {
             request.setValue(authorizationTestFlight, forHTTPHeaderField: "Authorization")
         }
-
-        // Make request
-        // Fazer a requisição
-        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-
+        
+        // Capture the value of isTestFlight before the Sendable closure is created.
+        let isTestFlight = self.isTestFlight
+        
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            Task { @MainActor in
                 do {
-                    if let error = error {
-                        print(error)
-                        throw error
-                    }
+                    if let error = error { throw error }
                     guard let data = data else { throw VersionError.invalidResponse }
-
+                    
                     let result = try JSONDecoder().decode(LookupResult.self, from: data)
-                    print(result)
-
-                    if self.isTestFlight {
-                        let info = result.data?.first
-                        completion(info, nil, nil)
+                    
+                    if isTestFlight {
+                        completion(result.data?.first, nil, nil)
                     } else {
-                        let info = result.results?.first
-                        completion(nil, info, nil)
+                        completion(nil, result.results?.first, nil)
                     }
-
+                    
                 } catch {
                     completion(nil, nil, error)
                 }
             }
-
+        }
+        
         task.resume()
         return task
-
-    }
-
-    func getBundle(key: String) -> String? {
-
-        guard let filePath = Bundle.main.path(forResource: "Info", ofType: "plist") else {
-          fatalError("Couldn't find file 'Info.plist'.")
-        }
-        // Add the file to a dictionary
-        let plist = NSDictionary(contentsOfFile: filePath)
-        // Check if the variable on plist exists
-        guard let value = plist?.object(forKey: key) as? String else {
-          fatalError("Couldn't find key '\(key)' in 'Info.plist'.")
-        }
-        return value
     }
 }
 
-// MARK: - Show Alert
+
+// MARK: - UIViewController Alert
 extension UIViewController {
-    @objc fileprivate func showAppUpdateAlert(version: String, force: Bool, appURL: String, isTestFlight: Bool , title:String? = nil , message:String?  = nil) {
-      //  guard let appName = KUpdater.shared.getBundle(key: "CFBundleName") else { return }
-
-        let alertTitle:String
-        if(title != nil) {
-            alertTitle = title!
-        } else {
-            alertTitle = "Update Available"
-        }
-        let alertMessage: String
-        if(message == nil){
-            if KUpdater.forceUpdate {
-                alertMessage = "A new update is required to continue using this app."
-            } else {
-                alertMessage = "A new update is available. Would you like to update now?"
-            }
-        } else{
-            alertMessage = message!
-        }
+    @objc fileprivate func showAppUpdateAlert(version: String, force: Bool, appURL: String, isTestFlight: Bool, title: String? = nil, message: String? = nil) {
+        // The showAppUpdateAlert is now on the MainActor
+        // The forceUpdate state is now passed as a parameter
+        let alertTitle = title ?? "Update Available"
+        let alertMessage = message ?? (force ? "A new update is required to continue using this app." : "A new update is available. Would you like to update now?")
+        
         let alertController = UIAlertController(title: alertTitle, message: alertMessage, preferredStyle: .alert)
-
         if !force {
-            let notNowButton = UIAlertAction(title: "Not now", style: .default)
-            alertController.addAction(notNowButton)
+            alertController.addAction(UIAlertAction(title: "Not now", style: .default))
         }
-
-        let updateButton = UIAlertAction(title: "Update", style: .default) { _ in
+        alertController.addAction(UIAlertAction(title: "Update", style: .default) { _ in
             guard let url = URL(string: appURL) else { return }
-            UIApplication.shared.open(url, options: [:], completionHandler: nil)
-
-//            // Only call showUpdate again if forceUpdate is true
-            if KUpdater.forceUpdate {
+            UIApplication.shared.open(url, options: [:])
+            if force {
                 KUpdater.shared.showUpdate(forceUpdate: true)
             }
-        }
-
-        alertController.addAction(updateButton)
-            self.present(alertController, animated: true, completion: nil)
-
+        })
+        self.present(alertController, animated: true)
     }
 }
