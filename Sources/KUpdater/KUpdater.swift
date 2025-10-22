@@ -44,6 +44,31 @@ struct AppInfo: Decodable {
         checkVersion(force: forceUpdate, title: title, message: message)
     }
     
+    @objc
+    public func isUpdateAvailable(completion: @escaping @Sendable (Bool, Error?) -> Void) {
+        if let currentVersion = self.getBundle(key: "CFBundleShortVersionString") {
+            _ = getAppInfo { (data, info, error) in
+                if let error = error {
+                    completion(false, error)
+                    return
+                }
+
+                // Check App Store version if it's not in TestFlight
+                if let appStoreAppVersion = info?.version, appStoreAppVersion > currentVersion {
+                    completion(true, nil)
+                }
+                // Check TestFlight version if in TestFlight
+                else if let testFlightAppVersion = data?.attributes.version, testFlightAppVersion > currentVersion {
+                    completion(true, nil)
+                }
+                else {
+                    completion(false, nil)
+                }
+            }
+        } else {
+            completion(false, VersionError.invalidBundleInfo)
+        }
+    }
     // MARK: - Check version
     private func checkVersion(force: Bool, title: String? = nil, message: String? = nil) {
         guard let currentVersion = getBundle(key: "CFBundleShortVersionString") else {
