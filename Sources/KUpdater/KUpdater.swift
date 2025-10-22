@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 // MARK: - Errors
 enum VersionError: Error {
@@ -82,14 +81,7 @@ struct AppInfo: Decodable {
     
     // This method is now also on the MainActor.
     private func handleVersionCheck(storeVersion: String, currentVersion: String, force: Bool, url: String?, title: String?, message: String?) {
-        if storeVersion <= currentVersion {
-            print("Already on the last version:", currentVersion)
-        } else {
-            print("Needs update: Version \(storeVersion) > Current version \(currentVersion)")
-            // No need for DispatchQueue.main.async here as the class is on the MainActor.
-            guard let topVC = UIApplication.shared.windows.first?.rootViewController else { return }
-            topVC.showAppUpdateAlert(version: storeVersion, force: force, appURL: url ?? "", isTestFlight: self.isTestFlight, title: title, message: message)
-        }
+        handleVersionCheckFile(storeVersion: storeVersion, currentVersion: currentVersion, force: force, url: url, title: title, message: message)
     }
     
     // MARK: - Helper
@@ -153,29 +145,5 @@ struct AppInfo: Decodable {
         
         task.resume()
         return task
-    }
-}
-
-
-// MARK: - UIViewController Alert
-extension UIViewController {
-    @objc fileprivate func showAppUpdateAlert(version: String, force: Bool, appURL: String, isTestFlight: Bool, title: String? = nil, message: String? = nil) {
-        // The showAppUpdateAlert is now on the MainActor
-        // The forceUpdate state is now passed as a parameter
-        let alertTitle = title ?? "Update Available"
-        let alertMessage = message ?? (force ? "A new update is required to continue using this app." : "A new update is available. Would you like to update now?")
-        
-        let alertController = UIAlertController(title: alertTitle, message: alertMessage, preferredStyle: .alert)
-        if !force {
-            alertController.addAction(UIAlertAction(title: "Not now", style: .default))
-        }
-        alertController.addAction(UIAlertAction(title: "Update", style: .default) { _ in
-            guard let url = URL(string: appURL) else { return }
-            UIApplication.shared.open(url, options: [:])
-            if force {
-                KUpdater.shared.showUpdate(forceUpdate: true)
-            }
-        })
-        self.present(alertController, animated: true)
     }
 }
