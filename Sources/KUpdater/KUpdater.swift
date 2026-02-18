@@ -1,6 +1,7 @@
 import Foundation
+#if(canImport(UIKit))
 import UIKit
-
+#endif
 // MARK: - Errors
 enum VersionError: Error {
     case invalidBundleInfo, invalidResponse, dataError
@@ -33,7 +34,9 @@ struct AppInfo: Decodable {
 @objc public class KUpdater: NSObject {
     
     @objc public static let shared = KUpdater()
-    
+    #if(canImport(UIKit))
+    private var alertWindow: UIWindow?
+    #endif
     // Persistent values to survive app background/foreground loops
     private var persistentTitle: String?
     private var persistentMessage: String?
@@ -46,7 +49,9 @@ struct AppInfo: Decodable {
     
     private override init() {
         super.init()
+     #if(canImport(UIKit))
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+        #endif
     }
 
     @objc private func handleAppDidBecomeActive() {
@@ -130,41 +135,57 @@ struct AppInfo: Decodable {
         }
     }
 
-    private func showAlert(version: String, force: Bool, url: String?, title: String?, message: String?) {
-        let keyWindow = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first { $0.isKeyWindow }
 
-        guard let topVC = keyWindow?.rootViewController else { return }
-        
-        // Prevent stacking alerts
-        if topVC.presentedViewController is UIAlertController {
-            topVC.dismiss(animated: false, completion: nil)
-        }
-        
+    private func showAlert(version: String, force: Bool, url: String?, title: String?, message: String?) {
+        #if canImport(UIKit)
         let finalUrl = url ?? "https://beta.itunes.apple.com/v1/app/\(appStoreId ?? "")"
         let alertTitle = title ?? "Update Available"
         let alertMessage = message ?? (force ? "A new update is required to continue." : "A new version (\(version)) is available.")
         
         let alert = UIAlertController(title: alertTitle, message: alertMessage, preferredStyle: .alert)
         
-        alert.addAction(UIAlertAction(title: "Update", style: .default) { _ in
+        // Update Action
+        alert.addAction(UIAlertAction(title: "Update", style: .default) { [weak self] _ in
             if let urlObj = URL(string: finalUrl) {
                 UIApplication.shared.open(urlObj)
             }
             if force {
                 Task { @MainActor in
-                    self.showUpdate(forceUpdate: true, title: title, message: message)
+                    self?.showUpdate(forceUpdate: true, title: title, message: message)
                 }
+            } else {
+                self?.cleanupAlertWindow()
             }
         })
         
+        // Not Now Action
         if !force {
-            alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Not Now", style: .cancel) { [weak self] _ in
+                self?.cleanupAlertWindow()
+            })
         }
+
+        // --- DEDICATED WINDOW LOGIC ---
+        // Improved scene detection: looks for any valid scene if 'active' isn't ready yet
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene
+                          ?? scenes.first as? UIWindowScene
+
+        guard let scene = windowScene else { return }
+
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIViewController()
+        window.windowLevel = .alert + 1
+        window.backgroundColor = .clear
         
-        topVC.present(alert, animated: true)
+        self.alertWindow = window
+        window.makeKeyAndVisible()
+        window.rootViewController?.present(alert, animated: true)
+        #endif
+    }
+    private func cleanupAlertWindow() {
+        alertWindow?.isHidden = true
+        alertWindow = nil
     }
 
     // MARK: - Helpers
