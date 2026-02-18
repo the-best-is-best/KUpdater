@@ -25,52 +25,79 @@ struct Attributes: Decodable {
 struct AppInfo: Decodable {
     let version: String
     let trackViewUrl: String
-    let trackId: Int // هذا هو الـ AppStore ID الذي سنحصل عليه تلقائياً
+    let trackId: Int
 }
 
 // MARK: - KUpdater
 @MainActor
 @objc public class KUpdater: NSObject {
-    private var persistentTitle: String?
-    private var persistentMessage: String?
     
     @objc public static let shared = KUpdater()
+    
+    // Persistent values to survive app background/foreground loops
+    private var persistentTitle: String?
+    private var persistentMessage: String?
+    private var isForced: Bool = false
     
     @objc public var isTestFlight: Bool = false
     @objc public var authorizationTestFlight: String? = nil
     @objc public var countryCode: String? = nil
-    
-    /// يتم تحديثه تلقائياً لنسخة المتجر، أو يتم ضبطه يدوياً لنسخة TestFlight
     @objc public var appStoreId: String? = nil
     
-    private var isForced: Bool = false
-    private var lastTitle: String?
-    private var lastMessage: String?
-
     private override init() {
         super.init()
         NotificationCenter.default.addObserver(self, selector: #selector(handleAppDidBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
-  
     @objc private func handleAppDidBecomeActive() {
-            // نستخدم القيم المحفوظة هنا
-            if isForced {
-                showUpdate(forceUpdate: true, title: persistentTitle, message: persistentMessage)
+        if isForced {
+            showUpdate(forceUpdate: true, title: persistentTitle, message: persistentMessage)
+        }
+    }
+
+    // MARK: - Public Methods
+    
+    /// Checks version and presents a UI Alert automatically if an update is found.
+    @objc public func showUpdate(forceUpdate: Bool = false, title: String? = nil, message: String? = nil) {
+        self.isForced = forceUpdate
+        
+        // Update persistent values only if new ones are provided
+        if let title = title { self.persistentTitle = title }
+        if let message = message { self.persistentMessage = message }
+        
+        checkVersion(force: forceUpdate, title: self.persistentTitle, message: self.persistentMessage)
+    }
+
+    /// Checks version and returns a boolean via completion handler. No UI is shown.
+    @objc public func isUpdateAvailable(completion: @escaping @Sendable (Bool, (any Error)?) -> Void) {
+        guard let currentVersion = self.getBundleValue(key: "CFBundleShortVersionString") else {
+            completion(false, VersionError.invalidBundleInfo)
+            return
+        }
+        
+        let isTF = self.isTestFlight
+        
+        _ = getAppInfo { [weak self] (tfData, storeInfo, error) in
+            guard let self = self else { return }
+            if let error = error {
+                completion(false, error)
+                return
+            }
+
+            Task { @MainActor in
+                let storeVersion = isTF ? tfData?.attributes.version : storeInfo?.version
+                
+                if let versionToCompare = storeVersion, self.compareVersions(current: currentVersion, store: versionToCompare) {
+                    completion(true, nil)
+                } else {
+                    completion(false, nil)
+                }
             }
         }
-    // MARK: - Public Methods
-    @objc public func showUpdate(forceUpdate: Bool = false, title: String? = nil, message: String? = nil) {
-            self.isForced = forceUpdate
-            
-            // تحديث القيم المحفوظة فقط إذا تم إرسال قيم جديدة (عشان ميمسحش القديم بـ nil)
-            if let title = title { self.persistentTitle = title }
-            if let message = message { self.persistentMessage = message }
-            
-            checkVersion(force: forceUpdate, title: self.persistentTitle, message: self.persistentMessage)
-        }
+    }
 
-    // MARK: - Logic
+    // MARK: - Internal Logic
+    
     nonisolated private func compareVersions(current: String, store: String) -> Bool {
         return store.compare(current, options: .numeric) == .orderedDescending
     }
@@ -87,8 +114,7 @@ struct AppInfo: Decodable {
                     print("KUpdater Error: \(error)")
                     return
                 }
-                
-                // نمرر الـ title والـ message للـ showAlert
+
                 if isTF, let tfVersion = tfInfo?.attributes.version {
                     if self.compareVersions(current: currentVersion, store: tfVersion) {
                         self.showAlert(version: tfVersion, force: force, url: nil, title: title, message: message)
@@ -105,22 +131,19 @@ struct AppInfo: Decodable {
     }
 
     private func showAlert(version: String, force: Bool, url: String?, title: String?, message: String?) {
-        // نأكد إننا بنستخدم الـ Main Queue للبحث عن الـ Window
         let keyWindow = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
             .first { $0.isKeyWindow }
-        
+
         guard let topVC = keyWindow?.rootViewController else { return }
         
-        // إذا كان هناك Alert ظاهر بالفعل، نغلقه قبل إظهار الجديد (لتجنب تراكم الـ Alerts عند الـ Re-open)
+        // Prevent stacking alerts
         if topVC.presentedViewController is UIAlertController {
             topVC.dismiss(animated: false, completion: nil)
         }
         
         let finalUrl = url ?? "https://beta.itunes.apple.com/v1/app/\(appStoreId ?? "")"
-        
-        // استخدام القيم الممرة (التي أصبحت persistent الآن)
         let alertTitle = title ?? "Update Available"
         let alertMessage = message ?? (force ? "A new update is required to continue." : "A new version (\(version)) is available.")
         
@@ -132,7 +155,6 @@ struct AppInfo: Decodable {
             }
             if force {
                 Task { @MainActor in
-                    // عند الضغط على Update في الـ Force، نعيد الكرة لضمان بقاء الـ Alert
                     self.showUpdate(forceUpdate: true, title: title, message: message)
                 }
             }
@@ -144,7 +166,7 @@ struct AppInfo: Decodable {
         
         topVC.present(alert, animated: true)
     }
-    
+
     // MARK: - Helpers
     private func getBundleValue(key: String) -> String? {
         return Bundle.main.object(forInfoDictionaryKey: key) as? String
@@ -152,7 +174,6 @@ struct AppInfo: Decodable {
     
     private func getRequestUrl(identifier: String) -> String {
         if isTestFlight {
-            // في TestFlight ما زلنا نحتاج لـ ID مسبق لأن البحث يتم عبر App Store Connect API
             return "https://api.appstoreconnect.apple.com/v1/apps/\(appStoreId ?? "")/builds"
         } else {
             let region = countryCode ?? Locale.current.regionCode ?? "us"
